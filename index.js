@@ -1,75 +1,54 @@
 const express = require("express");
 const multer = require("multer");
+const firebaseAdmin = require("firebase-admin");
 const path = require("path");
 const fs = require("fs");
-const admin = require("firebase-admin");
-const cors = require("cors");
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Firebase
+// Firebase Service Account
 const serviceAccount = require("./serviceAccountKey.json");
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-const db = admin.firestore();
 
-// Multer setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  },
+firebaseAdmin.initializeApp({
+  credential: firebaseAdmin.credential.cert(serviceAccount),
+  storageBucket: "your-bucket-name.appspot.com" // ✨ غيرها باسم الباكت بتاعك من Firebase
 });
-const upload = multer({ storage });
 
-// Routes
+const bucket = firebaseAdmin.storage().bucket();
+const app = express();
+
+// Multer لتخزين الفيديو مؤقتًا
+const upload = multer({ dest: "uploads/" });
+
+// Test Route
+app.get("/", (req, res) => {
+  res.send("🚀 Server is running on Railway!");
+});
+
+// رفع الفيديو
 app.post("/upload", upload.single("video"), async (req, res) => {
   try {
-    const { grade, subject, teacher, center } = req.body;
-    if (!req.file || !grade || !subject || !teacher || !center) {
-      return res.status(400).json({ error: "Missing fields or video" });
+    if (!req.file) {
+      return res.status(400).send("❌ مفيش فيديو مرفوع");
     }
 
-    const fileUrl = `${req.protocol}://${req.get("host")}/uploads/${req.file.filename}`;
+    const filePath = path.join(__dirname, req.file.path);
+    const destination = `videos/${Date.now()}_${req.file.originalname}`;
 
-    const videoData = {
-      grade,
-      subject,
-      teacher,
-      center,
-      videoUrl: fileUrl,
-      uploadedAt: new Date(),
-    };
+    await bucket.upload(filePath, {
+      destination,
+      metadata: { contentType: req.file.mimetype },
+    });
 
-    await db.collection("videos").add(videoData);
-    res.json({ success: true, data: videoData });
+    fs.unlinkSync(filePath); // حذف الملف من السيرفر بعد الرفع
+
+    res.status(200).send(`✅ الفيديو اترفع: ${destination}`);
   } catch (err) {
-    console.error("Error uploading:", err);
-    res.status(500).json({ error: "Internal server error" });
+    console.error("Error uploading video:", err);
+    res.status(500).send("❌ حصل خطأ أثناء الرفع");
   }
 });
 
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
-app.get("/", (req, res) => {
-  res.send("🚀 Video Upload Server is running on Railway!");
-});
-
-// تشغيل السيرفر
+// 📌 لازم Railway يختار البورت من process.env.PORT
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  const localUrl = `http://localhost:${PORT}`;
-  const railwayUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : null;
-
-  console.log(`🔥 Server running locally on: ${localUrl}`);
-  if (railwayUrl) {
-    console.log(`🌐 Server running on Railway: ${railwayUrl}`);
-  }
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🔥 Server running on port ${PORT}`);
 });
