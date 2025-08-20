@@ -1,54 +1,88 @@
 const express = require("express");
+const bodyParser = require("body-parser");
+const admin = require("firebase-admin");
 const multer = require("multer");
-const firebaseAdmin = require("firebase-admin");
 const path = require("path");
-const fs = require("fs");
 
-// Firebase Service Account
+// ========== Firebase Init ==========
 const serviceAccount = require("./serviceAccountKey.json");
 
-firebaseAdmin.initializeApp({
-  credential: firebaseAdmin.credential.cert(serviceAccount),
-  storageBucket: "your-bucket-name.appspot.com" // ✨ غيرها باسم الباكت بتاعك من Firebase
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: "your-firebase-bucket.appspot.com", // عدل اسم البكت بتاعك
 });
 
-const bucket = firebaseAdmin.storage().bucket();
+const db = admin.firestore();
+const bucket = admin.storage().bucket();
+
+// ========== Express Init ==========
 const app = express();
+app.use(bodyParser.json());
 
-// Multer لتخزين الفيديو مؤقتًا
-const upload = multer({ dest: "uploads/" });
+// Multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+const upload = multer({ storage });
 
-// Test Route
+// ========== Routes ==========
+
+// ✅ Test Route
 app.get("/", (req, res) => {
-  res.send("🚀 Server is running on Railway!");
+  res.send("✅ Backend is running on Railway & Local");
 });
 
-// رفع الفيديو
-app.post("/upload", upload.single("video"), async (req, res) => {
+// Upload video route
+app.post("/uploadVideo", upload.single("video"), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).send("❌ مفيش فيديو مرفوع");
+      return res.status(400).send("No file uploaded.");
     }
 
+    // Upload to Firebase Storage
     const filePath = path.join(__dirname, req.file.path);
-    const destination = `videos/${Date.now()}_${req.file.originalname}`;
+    const storageFile = bucket.file(req.file.filename);
 
     await bucket.upload(filePath, {
-      destination,
+      destination: req.file.filename,
       metadata: { contentType: req.file.mimetype },
     });
 
-    fs.unlinkSync(filePath); // حذف الملف من السيرفر بعد الرفع
+    // Get download URL
+    const [url] = await storageFile.getSignedUrl({
+      action: "read",
+      expires: "03-01-2030",
+    });
 
-    res.status(200).send(`✅ الفيديو اترفع: ${destination}`);
+    // Save video info to Firestore
+    await db.collection("videos").add({
+      name: req.file.originalname,
+      url: url,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.json({
+      message: "✅ File uploaded successfully",
+      url: url,
+    });
   } catch (err) {
-    console.error("Error uploading video:", err);
-    res.status(500).send("❌ حصل خطأ أثناء الرفع");
+    console.error("Error uploading file:", err);
+    res.status(500).send("Error uploading file.");
   }
 });
 
-// 📌 لازم Railway يختار البورت من process.env.PORT
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, "0.0.0.0", () => {
+// ========== Server ==========
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
   console.log(`🔥 Server running on port ${PORT}`);
+  if (process.env.PORT) {
+    console.log(`🌐 Server running on Railway: https://back-end8-production.up.railway.app`);
+  } else {
+    console.log(`🌐 Server running locally: http://localhost:${PORT}`);
+  }
 });
