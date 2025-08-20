@@ -60,8 +60,16 @@ app.get("/", (req, res) => {
   res.send("🚀 Video Upload Server is running on Railway!");
 });
 
-// تشغيل HTTP فقط
+// تشغيل السيرفر
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🔥 Server running on port ${PORT}`);
+  const localUrl = `http://localhost:${PORT}`;
+  const railwayUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : null;
+
+  console.log(`🔥 Server running locally on: ${localUrl}`);
+  if (railwayUrl) {
+    console.log(`🌐 Server running on Railway: ${railwayUrl}`);
+  }
 });
